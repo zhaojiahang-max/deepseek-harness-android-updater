@@ -1,9 +1,9 @@
 name: Build DSH APK with 154 WebView
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 允许手动点击触发
   push:
-    branches: [ main ]
+    branches: [ main ] # 推送到 main 分支时自动触发
 
 jobs:
   build:
@@ -22,24 +22,63 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools'
+          packages: 'platform-tools build-tools;34.0.0 platforms;android-34'
 
-      - name: Download 154 WebView kernel from Release
+      # ---- 1. 下载并解压你上传的 dsh-payload.zip (1.1 Release) ----
+      - name: Download and extract DSH payload
         run: |
-          mkdir -p android-app/app/src/main/assets/webview
-          curl -L -o android-app/app/src/main/assets/webview/webview154.apk \
+          mkdir -p "$RUNNER_TEMP/dsh-home"
+          curl -L -o "$RUNNER_TEMP/dsh-payload.zip" \
+            "https://github.com/zhaojiahang-max/deepseek-harness-android-updater/releases/download/1.1/dsh-payload.zip"
+          unzip -q "$RUNNER_TEMP/dsh-payload.zip" -d "$RUNNER_TEMP/dsh-home"
+          echo "DSH_DEV_HOME=$RUNNER_TEMP/dsh-home" >> $GITHUB_ENV
+          echo "解压后的顶层文件："
+          ls -la "$RUNNER_TEMP/dsh-home"
+
+      # ---- 2. 创建 CI 专用的 build/env.sh (覆盖手机上的 Termux 路径) ----
+      - name: Create CI env.sh for build.sh
+        run: |
+          mkdir -p "$RUNNER_TEMP/dsh-home/build"
+          # 覆盖原有的 env.sh，使其指向 GitHub Actions 提供的工具链
+          cat > "$RUNNER_TEMP/dsh-home/build/env.sh" << 'EOF'
+          #!/system/bin/sh
+          # CI 专用环境变量（由 build.sh source）
+          export JAVA_HOME="$JAVA_HOME"
+          export JAVA_BIN="$JAVA_HOME/bin"
+          export ANDROID_JAR="${ANDROID_HOME}/platforms/android-34/android.jar"
+          export PATH="${ANDROID_HOME}/build-tools/34.0.0:${ANDROID_HOME}/platform-tools:$JAVA_HOME/bin:$PATH"
+          EOF
+          echo "CI env.sh 创建成功"
+
+      # ---- 3. 下载 154 WebView 内核到 assets ----
+      - name: Download 154 WebView kernel
+        run: |
+          mkdir -p android-app/assets
+          curl -L -o android-app/assets/webview154.apk \
             "https://github.com/zhaojiahang-max/deepseek-harness-android-updater/releases/download/1.0/com.google.android.webview_154.0.8037.101-803710103_minAPI29.arm64-v8a.armeabi-v7a.nodpi._apkmirror.com.apk"
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x android-app/gradlew
+      # ---- 4. 生成临时签名密钥 (防止 release.jks 缺失导致构建失败) ----
+      - name: Generate temporary signing key
+        run: |
+          keytool -genkeypair -v -keystore android-app/release.jks -alias dsh \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=CI, OU=DSH, O=GitHub, L=CI, S=CI, C=CN"
 
+      # ---- 5. 执行 build.sh 构建 APK ----
       - name: Build APK
+        env:
+          DSH_DEV_HOME: ${{ runner.temp }}/dsh-home
+          KEYSTORE_PASS: "android"
+          KEYSTORE_ALIAS: "dsh"
         run: |
           cd android-app
-          ./gradlew assembleDebug
+          chmod +x build.sh env.sh build-vscreen-jar.sh
+          sh build.sh 2>&1 | tee build.log
 
       - name: Upload APK Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: dsh-154-webview-apk
-          path: android-app/app/build/outputs/apk/debug/*.apk
+          name: DeepSeekHarness-154-webview
+          path: android-app/DeepSeekHarness.apk
