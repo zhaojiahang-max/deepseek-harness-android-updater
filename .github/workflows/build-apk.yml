@@ -24,7 +24,6 @@ jobs:
         with:
           packages: 'platform-tools build-tools;34.0.0 platforms;android-34'
 
-      # ---- 1. 下载并解压 dsh-payload.zip ----
       - name: Download and extract DSH payload
         run: |
           mkdir -p "$RUNNER_TEMP/dsh-home"
@@ -33,14 +32,11 @@ jobs:
           unzip -q "$RUNNER_TEMP/dsh-payload.zip" -d "$RUNNER_TEMP/dsh-home"
           echo "DSH_DEV_HOME=$RUNNER_TEMP/dsh-home" >> $GITHUB_ENV
 
-      # ---- 2. 自动补全缺失的 .dsh 文件夹（补齐所有必备配置文件） ----
       - name: Auto-create missing .dsh folder
         run: |
           DSH_DIR="$RUNNER_TEMP/dsh-home/.dsh"
           mkdir -p "$DSH_DIR/profiles/web/node_modules/@deepseek-ai"
           mkdir -p "$DSH_DIR/profiles/web/node_modules/@jiesou"
-          
-          # 补全所有 build.sh 需要的配置文件
           touch "$DSH_DIR/cordis.patch.yml"
           touch "$DSH_DIR/cordis.yml"
           echo "{}" > "$DSH_DIR/settings.yaml"
@@ -48,13 +44,11 @@ jobs:
           touch "$DSH_DIR/profiles/web/cordis.yml"
           echo '{"name": "dsh"}' > "$DSH_DIR/profiles/web/package.json"
           touch "$DSH_DIR/profiles/web/pnpm-workspace.yaml"
-          
           if [ -d "plugins" ]; then
             cp -R plugins/* "$DSH_DIR/profiles/web/node_modules/@deepseek-ai/" || true
           fi
           echo "✅ .dsh 目录结构及配置文件补全完成"
 
-      # ---- 3. 创建 CI 专用的 build/env.sh ----
       - name: Create CI env.sh for build.sh
         run: |
           mkdir -p "$RUNNER_TEMP/dsh-home/build"
@@ -66,14 +60,12 @@ jobs:
           export PATH="${ANDROID_HOME}/build-tools/34.0.0:${ANDROID_HOME}/platform-tools:$JAVA_HOME/bin:$PATH"
           EOF
 
-      # ---- 4. 下载 154 WebView 内核到 assets ----
       - name: Download 154 WebView kernel
         run: |
           mkdir -p android-app/assets
           curl -L -o android-app/assets/webview154.apk \
             "https://github.com/zhaojiahang-max/deepseek-harness-android-updater/releases/download/1.0/com.google.android.webview_154.0.8037.101-803710103_minAPI29.arm64-v8a.armeabi-v7a.nodpi._apkmirror.com.apk"
 
-      # ---- 5. 生成临时签名密钥 ----
       - name: Generate temporary signing key
         run: |
           keytool -genkeypair -v -keystore android-app/release.jks -alias dsh \
@@ -81,7 +73,6 @@ jobs:
             -storepass android -keypass android \
             -dname "CN=CI, OU=DSH, O=GitHub, L=CI, S=CI, C=CN"
 
-      # ---- 6. 修复脚本兼容性并执行 build.sh ----
       - name: Build APK
         env:
           DSH_DEV_HOME: ${{ runner.temp }}/dsh-home
@@ -93,11 +84,10 @@ jobs:
           cd android-app
           chmod +x build.sh env.sh build-vscreen-jar.sh
           
-          # 1. 替换脚本里的 Android Shell 语法为 Bash 语法
-          sed -i 's/source /\. /g' build.sh build-vscreen-jar.sh env.sh
+          # 关键修复：只替换作为命令的 source，不碰 -source 这种参数
+          sed -i 's/\(^\|[[:space:]]\)source /\1\. /g' build.sh build-vscreen-jar.sh env.sh
           sed -i 's|#!/system/bin/sh|#!/bin/bash|g' build.sh build-vscreen-jar.sh env.sh
           
-          # 2. 重写 build-vscreen-jar.sh（加入 -classpath "$ANDROID_JAR"）
           cat > build-vscreen-jar.sh << 'EOF'
           #!/bin/bash
           set -e
@@ -119,7 +109,6 @@ jobs:
           EOF
           chmod +x build-vscreen-jar.sh
           
-          # 3. 让 build.sh 用 bash 调起新脚本
           sed -i 's|sh "$P/build-vscreen-jar.sh"|bash "$P/build-vscreen-jar.sh"|g' build.sh
           
           set +e
