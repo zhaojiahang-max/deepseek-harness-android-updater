@@ -35,32 +35,34 @@ jobs:
           echo "===== 解压后的结构 ====="
           ls -la "$RUNNER_TEMP/dsh-home"
 
-      # ---- 2. 自动补全缺失的 .dsh 文件夹（关键修复） ----
+      # ---- 2. 自动补全缺失的 .dsh 文件夹（关键修复：补全 @jiesou 目录） ----
       - name: Auto-create missing .dsh folder
         run: |
           DSH_DIR="$RUNNER_TEMP/dsh-home/.dsh"
-          if [ ! -d "$DSH_DIR" ]; then
-            echo "⚠️ 未找到 .dsh 目录，正在为构建自动创建..."
-            mkdir -p "$DSH_DIR/profiles/web/node_modules/@deepseek-ai"
-            
-            # 从你的仓库复制 plugins 到 .dsh 目录中，供 build.sh 使用
-            if [ -d "plugins" ]; then
-              cp -R plugins/* "$DSH_DIR/profiles/web/node_modules/@deepseek-ai/" || true
-              echo "  ✅ 已从仓库复制 plugins"
-            else
-              echo "  ⚠️ 仓库中没有 plugins 文件夹，跳过复制"
-            fi
-            
-            # 创建必要的空配置文件，防止 build.sh 报错
+          
+          # 无论 .dsh 是否存在，都确保这两个命名空间目录存在
+          mkdir -p "$DSH_DIR/profiles/web/node_modules/@deepseek-ai"
+          mkdir -p "$DSH_DIR/profiles/web/node_modules/@jiesou" # 关键修复：补全这个目录
+          
+          # 检查必要文件是否存在，不存在则创建占位符，防止 cp 命令报错
+          if [ ! -f "$DSH_DIR/cordis.patch.yml" ]; then
+            echo "⚠️ 未找到 .dsh 配置文件，正在为构建自动创建..."
             touch "$DSH_DIR/cordis.patch.yml"
             touch "$DSH_DIR/cordis.yml"
             echo "{}" > "$DSH_DIR/settings.yaml"
             echo '{"name": "dsh"}' > "$DSH_DIR/profiles/web/package.json"
             touch "$DSH_DIR/profiles/web/pnpm-workspace.yaml"
-            echo "  ✅ .dsh 目录已成功创建！"
-          else
-            echo "✅ 检测到 .dsh 目录，使用你上传的版本"
           fi
+          
+          # 确保插件被复制到 .dsh 目录中（build.sh 会校验这些插件）
+          if [ -d "plugins" ]; then
+            cp -R plugins/* "$DSH_DIR/profiles/web/node_modules/@deepseek-ai/" || true
+            echo "  ✅ 已从仓库复制 plugins 到 .dsh 目录"
+          else
+            echo "  ⚠️ 仓库中没有 plugins 文件夹，请确保源码中已包含必要插件"
+          fi
+          
+          echo "  ✅ .dsh 目录结构检查与补全完成"
 
       # ---- 3. 创建 CI 专用的 build/env.sh ----
       - name: Create CI env.sh for build.sh
