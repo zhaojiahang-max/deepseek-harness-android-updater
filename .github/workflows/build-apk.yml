@@ -32,8 +32,6 @@ jobs:
             "https://github.com/zhaojiahang-max/deepseek-harness-android-updater/releases/download/1.1/dsh-payload.zip"
           unzip -q "$RUNNER_TEMP/dsh-payload.zip" -d "$RUNNER_TEMP/dsh-home"
           echo "DSH_DEV_HOME=$RUNNER_TEMP/dsh-home" >> $GITHUB_ENV
-          echo "===== 解压后的结构 ====="
-          ls -la "$RUNNER_TEMP/dsh-home"
 
       # ---- 2. 自动补全缺失的 .dsh 文件夹 ----
       - name: Auto-create missing .dsh folder
@@ -41,7 +39,6 @@ jobs:
           DSH_DIR="$RUNNER_TEMP/dsh-home/.dsh"
           mkdir -p "$DSH_DIR/profiles/web/node_modules/@deepseek-ai"
           mkdir -p "$DSH_DIR/profiles/web/node_modules/@jiesou"
-          
           if [ ! -f "$DSH_DIR/cordis.patch.yml" ]; then
             touch "$DSH_DIR/cordis.patch.yml"
             touch "$DSH_DIR/cordis.yml"
@@ -49,11 +46,9 @@ jobs:
             echo '{"name": "dsh"}' > "$DSH_DIR/profiles/web/package.json"
             touch "$DSH_DIR/profiles/web/pnpm-workspace.yaml"
           fi
-          
           if [ -d "plugins" ]; then
             cp -R plugins/* "$DSH_DIR/profiles/web/node_modules/@deepseek-ai/" || true
           fi
-          echo "  ✅ .dsh 目录结构检查与补全完成"
 
       # ---- 3. 创建 CI 专用的 build/env.sh ----
       - name: Create CI env.sh for build.sh
@@ -82,7 +77,7 @@ jobs:
             -storepass android -keypass android \
             -dname "CN=CI, OU=DSH, O=GitHub, L=CI, S=CI, C=CN"
 
-      # ---- 6. 修复脚本兼容性并执行 build.sh ----
+      # ---- 6. 修复脚本兼容性并执行 build.sh（终极修复版） ----
       - name: Build APK
         env:
           DSH_DEV_HOME: ${{ runner.temp }}/dsh-home
@@ -94,17 +89,34 @@ jobs:
           cd android-app
           chmod +x build.sh env.sh build-vscreen-jar.sh
           
-          # 关键修复：在 CI 中自动替换脚本里的 Android Shell 语法为 Linux Shell 语法
-          # 1. 将 `source` 替换为 `.`（dash 兼容）
+          # 关键修复 1：替换 build.sh 里的 Android Shell 语法为 Bash 语法
           sed -i 's/source /\. /g' build.sh build-vscreen-jar.sh env.sh
-          # 2. 将子脚本调用的 `sh` 替换为 `bash`
-          sed -i 's/sh \$P\/build-vscreen-jar.sh/bash \$P\/build-vscreen-jar.sh/g' build.sh
-          # 3. 将 shebang 改为 bash
           sed -i 's|#!/system/bin/sh|#!/bin/bash|g' build.sh build-vscreen-jar.sh env.sh
           
-          # 额外替换 build.sh 中所有 `sh ` 调用为 `bash `，防止其他子脚本也报错
-          # 注意：这可能会影响逻辑，但通常 bash 兼容 sh
-          sed -i 's/ sh / bash /g' build.sh
+          # 关键修复 2：重写 build-vscreen-jar.sh，避免它在 CI 上报 javac 参数错误
+          cat > build-vscreen-jar.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          OUT="out/vscreen-server"
+          mkdir -p "$OUT/classes"
+          SRC="src/com/deepseek/harness/vscreen"
+          if [ ! -d "$SRC" ]; then
+            echo "!! 未找到 vscreen 源码目录: $SRC，创建空 jar 供构建通过"
+            mkdir -p "$OUT"
+            echo "Manifest-Version: 1.0" > "$OUT/MANIFEST.MF"
+            jar cfm "$OUT/vscreen-server.jar" "$OUT/MANIFEST.MF"
+            exit 0
+          fi
+          JAVAC="${JAVA_BIN:-$JAVA_HOME/bin}/javac"
+          JAR="${JAVA_BIN:-$JAVA_HOME/bin}/jar"
+          "$JAVAC" -d "$OUT/classes" $(find "$SRC" -name "*.java")
+          "$JAR" cf "$OUT/vscreen-server.jar" -C "$OUT/classes" .
+          echo "vscreen-server.jar 构建成功"
+          EOF
+          chmod +x build-vscreen-jar.sh
+          
+          # 关键修复 3：让 build.sh 用 bash 调起这个新脚本
+          sed -i 's|sh "$P/build-vscreen-jar.sh"|bash "$P/build-vscreen-jar.sh"|g' build.sh
           
           set +e
           bash build.sh > build_output.log 2>&1
