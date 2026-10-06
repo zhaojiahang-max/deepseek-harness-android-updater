@@ -1,9 +1,9 @@
 name: Build DSH APK with 154 WebView
 
 on:
-  workflow_dispatch: # 允许手动触发
+  workflow_dispatch:
   push:
-    branches: [ main ] # 推送到 main 分支时自动触发
+    branches: [ main ]
 
 jobs:
   build:
@@ -20,7 +20,9 @@ jobs:
           java-version: "17"
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       - name: Download 154 WebView kernel from Release
         run: |
