@@ -1,0 +1,43 @@
+name: Build DSH APK with 154 WebView
+
+on:
+  workflow_dispatch: # 允许手动触发
+  push:
+    branches: [ main ] # 推送到 main 分支时自动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Download 154 WebView kernel from Release
+        run: |
+          mkdir -p android-app/app/src/main/assets/webview
+          curl -L -o android-app/app/src/main/assets/webview/webview154.apk \
+            "https://github.com/zhaojiahang-max/deepseek-harness-android-updater/releases/download/1.0/com.google.android.webview_154.0.8037.101-803710103_minAPI29.arm64-v8a.armeabi-v7a.nodpi._apkmirror.com.apk"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android-app/gradlew
+
+      - name: Build APK
+        run: |
+          cd android-app
+          ./gradlew assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-154-webview-apk
+          path: android-app/app/build/outputs/apk/debug/*.apk
